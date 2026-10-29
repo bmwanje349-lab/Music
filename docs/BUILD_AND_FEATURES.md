@@ -14,7 +14,7 @@ Luma Music is an Android-first local music player built around the repository's 
 
 - Media3 ExoPlayer owns the playback queue, audio focus, noisy-output handling, and playback lifecycle.
 - MediaSessionService publishes the session for Android system controls.
-- Playback transitions use a gentle fade-down before manual Next/Previous or song selection, plus an automatic fade near the end of a track and a fade-up when the next item is ready. The transition service remains active during background playback. Media3 still owns playlist progression and decoding; this is a volume-ramped transition, not a two-song-overlap DJ crossfade.
+- Song transitions are handled by `SmartCrossfadeManager`, which preloads the next item on a second Media3 playback pipeline and can overlap the tracks using an equal-power fade curve. Smart mode avoids imposed overlaps for same-album/same-artist runs; Crossfade, Fade, and Off modes are available in Settings. Manual skips and song selection use a shorter fade. A single service-level audio-focus request is shared by both players.
 - DspAudioProcessor is inserted into the Media3 audio sink for stereo PCM16 output.
 - JNI routes the signal through stereo_dsp::EngineSelector, then through the existing 16-band peq::Engine.
 - The selector's Off, Consumer Enhancer, and Halo Bloom options choose one enhancer at a time. The PEQ is a separate stage and can be switched independently.
@@ -43,5 +43,5 @@ The app requests READ_MEDIA_AUDIO on Android 13 and later and READ_EXTERNAL_STOR
 
 - This first app pass scans Android's MediaStore audio index; it does not yet add playlist editing, tag editing, network streaming, lyrics lookup, a home-screen widget, cloud sync, or Android Auto-specific screens.
 - DSP currently targets stereo PCM16 audio in the custom processor. Other decoded formats should remain on Media3's normal processor path.
-- The supplied C++ engines are integrated by linking existing source files. Their audio behavior, CPU cost, and audio-format compatibility still need device-level listening and measurement.
+- The supplied C++ engines are integrated by linking existing source files. During a true crossfade, both playback pipelines run the native DSP chain; DSP controls are synchronized across both instances. CPU cost, codec compatibility, Bluetooth output behavior and real-world transitions still need listening tests on the device.
 - Android build success, device playback stability, permissions, audio focus, and artifact packaging are verified by the CI workflow when it runs successfully, not inferred from source creation.
