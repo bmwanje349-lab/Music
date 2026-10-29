@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/luma-music-player
+      - feat/enhancer-bloom-space
   pull_request:
     branches:
       - main
