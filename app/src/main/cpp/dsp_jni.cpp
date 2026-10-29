@@ -171,7 +171,7 @@ Java_com_bmwanje_luma_playback_DspAudioProcessor_nativeDrain(
     if (p == nullptr || !p->configured || outputBuffer == nullptr) return 0;
     auto* output = static_cast<int16_t*>(env->GetDirectBufferAddress(outputBuffer));
     const jlong capacity = env->GetDirectBufferCapacity(outputBuffer);
-    if (output == nullptr || capacity < sizeof(int16_t) * kChannels) return 0;
+    if (output == nullptr || capacity < static_cast<jlong>(sizeof(int16_t) * kChannels)) return 0;
 
     const int capacityFrames = static_cast<int>(capacity / (sizeof(int16_t) * kChannels));
     const int requestedFrames = std::max(0, std::min({maxFrames, kDrainMaxFrames, capacityFrames}));
