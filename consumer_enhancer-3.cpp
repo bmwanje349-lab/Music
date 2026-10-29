@@ -27,6 +27,21 @@ constexpr float kSpaceAmbience = 0.75f;
 constexpr float kSpaceWiden = 0.5f;
 constexpr float kSpaceTapMs[4] = {11.3f, 17.9f, 23.7f, 31.1f};
 constexpr float kSpaceTapGain[4] = {0.50f, -0.40f, 0.32f, -0.25f};
+
+// Bloom-inspired room layer for the Enhancer. Delays include the 12 ms pre-delay,
+// scaled by the port's estimated 1.15 room size. Gains are intentionally stronger
+// than Halo's room taps so the Enhancer's full Space setting is clearly audible.
+constexpr float kHaloRoomTapMs[3] = {33.35f, 47.15f, 69.0f};
+constexpr float kHaloRoomPan[3] = {-0.72f, 0.70f, -0.12f};
+constexpr float kHaloRoomGain[3] = {0.54f, 0.40f, 0.30f};
+constexpr float kHaloRoomCutoff[3] = {5400.0f, 3900.0f, 2500.0f};
+constexpr float kHaloRoomTail = 0.38f;
+constexpr float kHaloRoomSideSend = 0.55f;
+constexpr float kHaloRoomMidSend = 0.20f;
+constexpr float kHaloAirDb = 3.5f;
+constexpr float kHaloFocusDb = 2.2f;
+constexpr float kHaloWarmthDb = 0.9f;
+constexpr float kHaloWidth = 0.65f;
 constexpr float kAutoFloorDb = -20.0f;   // lift tracks quieter than this (RMS dBFS)
 constexpr float kAutoCeilDb = -9.0f;     // trim only tracks hotter than this
 constexpr float kAutoMaxBoostDb = 9.0f;
@@ -221,8 +236,11 @@ bool ConsumerEnhancer::prepare(const Config& requested) noexcept {
     try {
         const std::size_t size = static_cast<std::size_t>(std::ceil(0.040 * fs)) + 2U;
         spaceBuf_.assign(size, 0.0f);
+        const std::size_t roomSize = static_cast<std::size_t>(std::ceil(0.085 * fs)) + 2U;
+        haloRoomBuf_.assign(roomSize, 0.0f);
     } catch (...) {
         spaceBuf_.clear();
+        haloRoomBuf_.clear();
         return false;
     }
     for (std::size_t k = 0; k < kSpaceTaps; ++k) {
@@ -231,6 +249,15 @@ bool ConsumerEnhancer::prepare(const Config& requested) noexcept {
     spaceHp_.setHighPass(fs, std::min(250.0, nyq));
     spaceLp_.setLowPass(fs, std::min(7000.0, nyq));
     sideWidenHp_.setHighPass(fs, std::min(450.0, nyq));
+    haloRoomSideHp_.setHighPass(fs, std::min(120.0, nyq));
+    haloRoomSendHp_.setHighPass(fs, std::min(180.0, nyq));
+    for (std::size_t k = 0; k < kHaloRoomTaps; ++k) {
+        haloRoomTapLp_[k].setLowPass(fs, std::min(kHaloRoomCutoff[k], nyq));
+        haloRoomDelay_[k] = static_cast<std::size_t>(kHaloRoomTapMs[k] * 0.001 * fs);
+        const float angle = (kHaloRoomPan[k] + 1.0f) * static_cast<float>(kPi) / 4.0f;
+        haloRoomTapGainL_[k] = std::cos(angle) * kHaloRoomGain[k];
+        haloRoomTapGainR_[k] = std::sin(angle) * kHaloRoomGain[k];
+    }
 
     // Harmonic bass: 4th-order low-pass at 120 Hz picks the fundamental region,
     // 4th-order high-pass at 150 Hz plus a 650 Hz low-pass keep only harmonics
@@ -289,6 +316,12 @@ void ConsumerEnhancer::clearStates() noexcept {
     inPower_ = outPower_ = 0.0f; matchDb_ = 0.0f; matchDesired_ = 0.0f; spaceSafe_ = 1.0f;
     harshBandEnv_ = harshFullEnv_ = 0.0f;
     spaceHp_.clear(); spaceLp_.clear(); sideWidenHp_.clear();
+    haloAir_.clear(); haloFocus_.clear(); haloDip_.clear(); haloWarmth_.clear();
+    haloRoomSideHp_.clear(); haloRoomSendHp_.clear();
+    for (auto& b : haloRoomTapLp_) b.clear();
+    std::fill(haloRoomBuf_.begin(), haloRoomBuf_.end(), 0.0f);
+    haloRoomWrite_ = 0U;
+    haloRoomFeedback_ = 0.0f;
 }
 
 void ConsumerEnhancer::reset() noexcept {
@@ -308,6 +341,13 @@ void ConsumerEnhancer::updateCoefficients() noexcept {
     sideHighShelf_.setHighShelf(fs, std::min(7500.0, nyq), highDb);
     midPresence_.setPeaking(fs, std::min(2800.0, nyq), 0.9, 3.5 * smooth_[kMelody]);
     midMud_.setPeaking(fs, std::min(320.0, nyq), 0.8, -1.2 * smooth_[kMelody]);
+
+    // Bloom-like tonal shaping follows Space, separate from the Enhancer's tone trims.
+    haloFocus_.setPeaking(fs, std::min(2800.0, nyq), 0.9, kHaloFocusDb * smooth_[kSpace]);
+    haloWarmth_.setLowShelf(fs, std::min(220.0, nyq), kHaloWarmthDb * smooth_[kSpace]);
+    haloAir_.setHighShelf(fs, std::min(7800.0, nyq), kHaloAirDb * smooth_[kSpace]);
+    haloDip_.setPeaking(fs, std::min(2800.0, nyq), 0.75,
+                        -0.45 * kHaloFocusDb * smooth_[kSpace]);
 }
 
 // ---------------------------------------------------------------- controls
@@ -628,10 +668,22 @@ void ConsumerEnhancer::process(float* samples, std::size_t frames) noexcept {
             out[1] += out[1] * wetGain;
         }
 
-        // ---- 7. Space: ambience + airy width, Side only (mono sum untouched)
+        // ---- 7. Space: stronger Bloom-like width, tone, panned reflections and tail.
+        // This extra room layer is part of the Enhancer only; HaloEngine is untouched.
         {
-            const float m = 0.5f * (out[0] + out[1]);
+            const float amount = smooth_[kSpace] * spaceSafe_;
+            float m = 0.5f * (out[0] + out[1]);
             float s = 0.5f * (out[0] - out[1]);
+
+            // Centre definition/warmth and side-only air, following Halo's spectral split.
+            m = haloWarmth_.process(haloFocus_.process(m));
+            s = haloDip_.process(haloAir_.process(s));
+
+            // A stronger stereo bloom opens further on attacks, but backs off on mixes
+            // already judged too wide by the existing spaceSafe_ guard.
+            s *= 1.0f + kHaloWidth * amount + 0.18f * attackAmount * amount;
+
+            // Preserve the original four-tap ambience path.
             const std::size_t size = spaceBuf_.size();
             spaceBuf_[spaceWrite_] = m;
             float amb = 0.0f;
@@ -641,11 +693,34 @@ void ConsumerEnhancer::process(float* samples, std::size_t frames) noexcept {
             }
             spaceWrite_ = (spaceWrite_ + 1U) % size;
             amb = spaceLp_.process(spaceHp_.process(amb));
-            const float tail = 1.0f - 0.6f * attackAmount;  // keep drum hits dry
+            const float tail = 1.0f - 0.6f * attackAmount;  // keep drum hits relatively dry
             const float airySide = sideWidenHp_.process(s);
-            s += smooth_[kSpace] * spaceSafe_ * (kSpaceAmbience * tail * amb + kSpaceWiden * airySide);
-            out[0] = m + s;
-            out[1] = m - s;
+            s += amount * (kSpaceAmbience * tail * amb + kSpaceWiden * airySide);
+
+            // New long room: 13.8 ms pre-delay + three Bloom-timed reflections.
+            // The last filtered tap feeds a bounded feedback tail into the ring buffer.
+            const float roomSide = haloRoomSideHp_.process(s) * kHaloRoomSideSend;
+            const float roomMid = m * kHaloRoomMidSend;
+            const float roomSend = haloRoomSendHp_.process(roomSide + roomMid);
+            const std::size_t roomSize = haloRoomBuf_.size();
+            haloRoomBuf_[haloRoomWrite_] = roomSend * amount + haloRoomFeedback_ * amount;
+
+            float roomTap[kHaloRoomTaps] = {};
+            for (std::size_t k = 0; k < kHaloRoomTaps; ++k) {
+                const std::size_t idx = (haloRoomWrite_ + roomSize - haloRoomDelay_[k]) % roomSize;
+                roomTap[k] = haloRoomTapLp_[k].process(haloRoomBuf_[idx]);
+            }
+            haloRoomWrite_ = (haloRoomWrite_ + 1U) % roomSize;
+            haloRoomFeedback_ = std::isfinite(roomTap[2]) ? roomTap[2] * kHaloRoomTail : 0.0f;
+
+            float reflectionL = 0.0f, reflectionR = 0.0f;
+            for (std::size_t k = 0; k < kHaloRoomTaps; ++k) {
+                reflectionL += roomTap[k] * haloRoomTapGainL_[k];
+                reflectionR += roomTap[k] * haloRoomTapGainR_[k];
+            }
+
+            out[0] = m + s + reflectionL;
+            out[1] = m - s + reflectionR;
         }
 
         // ---- 8. Loudness match: hold output loudness to the (leveled) input loudness
