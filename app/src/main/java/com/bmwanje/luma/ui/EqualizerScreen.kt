@@ -121,7 +121,7 @@ fun EqualizerScreen() {
                 ) {
                     DspPreset.entries.forEach { preset ->
                         FilterChip(
-                            selected = settings.preset == preset,
+                            selected = settings.gainsDb == preset.gainsDb,
                             onClick = { DspController.applyPreset(preset) },
                             label = { Text(preset.title) }
                         )
