@@ -51,6 +51,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +73,8 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.MediaItem
 import coil.compose.AsyncImage
 import com.bmwanje.luma.data.MusicTrack
+import com.bmwanje.luma.playback.SongTransitionSettings
+import com.bmwanje.luma.playback.SongTransitionStyle
 
 private val LumaLime = Color(0xFFB7F36B)
 private val CardColor = Color(0xFF151923)
@@ -466,7 +469,14 @@ fun MiniPlayer(
 }
 
 @Composable
-fun SettingsScreen(trackCount: Int, hasPermission: Boolean, onRescan: () -> Unit) {
+fun SettingsScreen(
+    trackCount: Int,
+    hasPermission: Boolean,
+    onRescan: () -> Unit,
+    transitionSettings: SongTransitionSettings,
+    onTransitionStyleChange: (SongTransitionStyle) -> Unit,
+    onTransitionDurationChange: (Long) -> Unit
+) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 22.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
@@ -494,6 +504,57 @@ fun SettingsScreen(trackCount: Int, hasPermission: Boolean, onRescan: () -> Unit
                     Spacer(Modifier.width(8.dp))
                     Text("Rescan music")
                 }
+            }
+        }
+        Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = CardColor)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Headphones, contentDescription = null, tint = LumaLime)
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Song transitions", fontWeight = FontWeight.SemiBold)
+                        Text(transitionSettings.style.description, color = MutedText, fontSize = 12.sp)
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SongTransitionStyle.entries.forEach { style ->
+                        FilterChip(
+                            selected = transitionSettings.style == style,
+                            onClick = { onTransitionStyleChange(style) },
+                            label = { Text(style.label) }
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Transition length", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        String.format(java.util.Locale.getDefault(), "%.1f sec", transitionSettings.durationMs / 1000f),
+                        color = LumaLime,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = transitionSettings.durationMs.toFloat(),
+                    onValueChange = { onTransitionDurationChange((it / 500f).toLong() * 500L) },
+                    valueRange = 1_000f..8_000f,
+                    steps = 13,
+                    enabled = transitionSettings.style != SongTransitionStyle.NONE
+                )
+                Text(
+                    when (transitionSettings.style) {
+                        SongTransitionStyle.SMART -> "Smart keeps tracks from the same album flowing in their intended order. Other tracks blend when the next song is ready."
+                        SongTransitionStyle.CROSSFADE -> "Both tracks overlap: the current song eases down as the next song rises."
+                        SongTransitionStyle.FADE -> "The current song fades out before the next song fades in. No overlap."
+                        SongTransitionStyle.NONE -> "Automatic transitions are left untouched. Manual skips still use a tiny fade to avoid clicks."
+                    },
+                    color = MutedText,
+                    fontSize = 12.sp
+                )
             }
         }
         Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF171E1A))) {
