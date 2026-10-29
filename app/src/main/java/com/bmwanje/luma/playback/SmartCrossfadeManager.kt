@@ -381,6 +381,26 @@ class SmartCrossfadeManager(
         standby.volume = 0f
     }
 
+    /** Stops the automatic blend cleanly before a user skips or replaces the queue. */
+    fun interruptCrossfadeForManualChange() {
+        if (!isCrossfading) return
+        val outgoingIndex = 1 - activeIndex
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        isCrossfading = false
+        preparedForMediaId = null
+        preparedNextMediaId = null
+        fadingMediaId = null
+
+        val outgoing = players[outgoingIndex]
+        outgoing.pause()
+        outgoing.volume = 0f
+        outgoing.clearMediaItems()
+        // Keep the incoming level where the crossfade left it; the manual action's own short
+        // fade will continue from that level rather than fighting the cancelled auto-ramp.
+        observedMediaId = activePlayer.currentMediaItem?.mediaId
+    }
+
     /** Cancels any in-flight blend when the listener explicitly pauses or audio focus is lost. */
     fun recoverAfterPauseOrFocusLoss() {
         crossfadeJob?.cancel()
