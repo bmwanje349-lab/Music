@@ -193,12 +193,22 @@ private:
     float harshBandEnv_ = 0.0f, harshFullEnv_ = 0.0f;
     float harshAtt_ = 0.0f, harshRel_ = 0.0f, harshFullAtt_ = 0.0f, harshFullRel_ = 0.0f;
 
-    // Space: Side-only ambience taps + airy widening (mono sum is untouched)
+    // Space: original ambience plus a Bloom-inspired panned room layer.
     static constexpr std::size_t kSpaceTaps = 4;
     std::vector<float> spaceBuf_;
     std::size_t spaceWrite_ = 0U;
     std::size_t spaceDelay_[kSpaceTaps] = {};
     Biquad spaceHp_, spaceLp_, sideWidenHp_;
+
+    static constexpr std::size_t kHaloRoomTaps = 3;
+    std::vector<float> haloRoomBuf_;
+    std::size_t haloRoomWrite_ = 0U;
+    std::size_t haloRoomDelay_[kHaloRoomTaps] = {};
+    Biquad haloRoomSideHp_, haloRoomSendHp_, haloRoomTapLp_[kHaloRoomTaps];
+    Biquad haloAir_, haloFocus_, haloDip_, haloWarmth_;
+    float haloRoomTapGainL_[kHaloRoomTaps] = {};
+    float haloRoomTapGainR_[kHaloRoomTaps] = {};
+    float haloRoomFeedback_ = 0.0f;
 
     // Glue
     float gluePower_ = 0.0f;
