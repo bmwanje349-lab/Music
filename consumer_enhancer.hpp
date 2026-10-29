@@ -131,7 +131,7 @@ private:
     std::uint32_t ctrlCounter_ = 0U;
 
     // Mid/Side tone
-    Biquad midLowShelf_, midHighShelf_, midPresence_, midMud_, sideHighShelf_;
+    Biquad midLowShelf_, midHighShelf_, midPresence_, midMud_, sideHighShelf_, sidePresenceDip_;
 
     // Harmonic bass
     Biquad bassLp1_, bassLp2_, bassHp1_, bassHp2_, bassBandLp_;
@@ -193,12 +193,15 @@ private:
     float harshBandEnv_ = 0.0f, harshFullEnv_ = 0.0f;
     float harshAtt_ = 0.0f, harshRel_ = 0.0f, harshFullAtt_ = 0.0f, harshFullRel_ = 0.0f;
 
-    // Space: Side-only ambience taps + airy widening (mono sum is untouched)
+    // Space: stronger panned reflections + feedback tail + short side-only orbit.
     static constexpr std::size_t kSpaceTaps = 4;
-    std::vector<float> spaceBuf_;
+    std::vector<float> spaceBuf_, spaceSideBuf_;
     std::size_t spaceWrite_ = 0U;
     std::size_t spaceDelay_[kSpaceTaps] = {};
-    Biquad spaceHp_, spaceLp_, sideWidenHp_;
+    float spaceTapGainL_[kSpaceTaps] = {}, spaceTapGainR_[kSpaceTaps] = {};
+    float spaceFeedback_ = 0.0f, spacePhase_ = 0.0f, spaceEnv_ = 0.0f;
+    float spaceEnvAtt_ = 0.0f, spaceEnvRel_ = 0.0f;
+    Biquad spaceHp_, spaceLp_[2], sideWidenHp_;
 
     // Glue
     float gluePower_ = 0.0f;
