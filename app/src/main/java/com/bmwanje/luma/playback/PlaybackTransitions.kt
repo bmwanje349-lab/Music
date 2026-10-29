@@ -24,7 +24,8 @@ class TransitioningPlayer(
     private val delegate: Player,
     private val transitionScope: CoroutineScope,
     private val requestAudioFocus: () -> Boolean = { true },
-    private val onUserPause: () -> Unit = {}
+    private val onUserPause: () -> Unit = {},
+    private val onBeforeManualChange: () -> Unit = {}
 ) : ForwardingPlayer(delegate), AutoCloseable {
     private var skipJob: Job? = null
     private var fadeInJob: Job? = null
@@ -88,16 +89,19 @@ class TransitioningPlayer(
     }
 
     override fun setMediaItems(mediaItems: List<MediaItem>) {
+        onBeforeManualChange()
         markFadeForQueueReplacement()
         delegate.setMediaItems(mediaItems)
     }
 
     override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) {
+        onBeforeManualChange()
         markFadeForQueueReplacement()
         delegate.setMediaItems(mediaItems, resetPosition)
     }
 
     override fun setMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long) {
+        onBeforeManualChange()
         markFadeForQueueReplacement()
         delegate.setMediaItems(mediaItems, startIndex, startPositionMs)
     }
@@ -119,6 +123,7 @@ class TransitioningPlayer(
     }
 
     private fun fadeThen(command: () -> Unit) {
+        onBeforeManualChange()
         if (!delegate.isPlaying || delegate.volume <= 0.001f) {
             command()
             return
