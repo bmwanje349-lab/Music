@@ -4,7 +4,6 @@ import android.content.Context
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
-import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -123,6 +122,7 @@ class SmartCrossfadeManager(
     private var preparedNextMediaId: String? = null
     private var fadingMediaId: String? = null
     private var observedMediaId: String? = players[0].currentMediaItem?.mediaId
+    private val playerListeners = mutableListOf<Pair<Player, Player.Listener>>()
 
     val activePlayer: ExoPlayer
         get() = players[activeIndex]
@@ -132,7 +132,7 @@ class SmartCrossfadeManager(
             "Luma's crossfade mixer requires exactly two playback pipelines."
         }
         players.forEachIndexed { index, player ->
-            player.addListener(object : Player.Listener {
+            val listener = object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     if (index != activeIndex || isCrossfading) return
                     onActiveTrackChanged(mediaItem?.mediaId)
@@ -143,26 +143,21 @@ class SmartCrossfadeManager(
                         focus.release()
                     }
                 }
-            })
+            }
+            player.addListener(listener)
+            playerListeners += player to listener
         }
         monitorJob = scope.launch { monitorPlayback() }
     }
 
     private fun onActiveTrackChanged(mediaId: String?) {
+        if (observedMediaId == mediaId) return
         observedMediaId = mediaId
         fadeJob?.cancel()
         fadeJob = null
         fadingMediaId = null
-        wrappers[activeIndex].cancelPendingFadeIn()
+        // TransitioningPlayer owns incoming manual/fade-mode ramps. Do not cancel its fade job here.
         discardStandby()
-        if (activePlayer.volume < 0.99f && activePlayer.playWhenReady) {
-            wrappers[activeIndex].fadeInAfterNextChange()
-            fadeJob = scope.launch {
-                fadePlayerVolume(activePlayer, 1f, 300L)
-            }
-        } else {
-            activePlayer.volume = 1f
-        }
     }
 
     private suspend fun monitorPlayback() {
@@ -432,15 +427,11 @@ class SmartCrossfadeManager(
         monitorJob?.cancel()
         crossfadeJob?.cancel()
         fadeJob?.cancel()
+        playerListeners.forEach { (player, listener) -> player.removeListener(listener) }
+        playerListeners.clear()
         players.forEachIndexed { index, player ->
-            player.removeListenerPlaceholder()
             player.pause()
             player.volume = if (index == activeIndex) 1f else 0f
         }
-    }
-
-    private fun Player.removeListenerPlaceholder() {
-        // The listener instances are anonymous in the manager; releasing the players also
-        // removes them. This method keeps close() symmetric without retaining another reference.
     }
 }
