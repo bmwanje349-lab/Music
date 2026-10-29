@@ -252,7 +252,7 @@ bool ConsumerEnhancer::prepare(const Config& requested) noexcept {
     haloRoomSideHp_.setHighPass(fs, std::min(120.0, nyq));
     haloRoomSendHp_.setHighPass(fs, std::min(180.0, nyq));
     for (std::size_t k = 0; k < kHaloRoomTaps; ++k) {
-        haloRoomTapLp_[k].setLowPass(fs, std::min(kHaloRoomCutoff[k], nyq));
+        haloRoomTapLp_[k].setLowPass(fs, std::min(static_cast<double>(kHaloRoomCutoff[k]), nyq));
         haloRoomDelay_[k] = static_cast<std::size_t>(kHaloRoomTapMs[k] * 0.001 * fs);
         const float angle = (kHaloRoomPan[k] + 1.0f) * static_cast<float>(kPi) / 4.0f;
         haloRoomTapGainL_[k] = std::cos(angle) * kHaloRoomGain[k];
