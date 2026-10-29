@@ -1,6 +1,7 @@
 package com.bmwanje.luma.playback
 
 import android.content.Context
+import java.util.concurrent.CopyOnWriteArraySet
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -28,7 +29,8 @@ object DspController {
 
     private var initialized = false
     private lateinit var preferences: android.content.SharedPreferences
-    @Volatile private var processor: DspAudioProcessor? = null
+    // More than one processor is alive during a crossfade. Keep both DSP chains in sync.
+    private val processors = CopyOnWriteArraySet<DspAudioProcessor>()
 
     private val mutableSettings = MutableStateFlow(DspSettings())
     val settings = mutableSettings.asStateFlow()
@@ -59,12 +61,12 @@ object DspController {
     }
 
     internal fun attach(next: DspAudioProcessor) {
-        processor = next
+        processors.add(next)
         applyTo(next, mutableSettings.value)
     }
 
     internal fun detach(old: DspAudioProcessor) {
-        if (processor === old) processor = null
+        processors.remove(old)
     }
 
     fun selectEngine(engine: SoundEngine) = update { it.copy(engine = engine) }
@@ -97,7 +99,7 @@ object DspController {
                 .putString(KEY_PRESET, next.preset.name)
                 .apply()
         }
-        processor?.let { applyTo(it, next) }
+        processors.forEach { applyTo(it, next) }
     }
 
     private fun applyTo(target: DspAudioProcessor, value: DspSettings) {
