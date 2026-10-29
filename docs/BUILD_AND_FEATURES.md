@@ -14,6 +14,7 @@ Luma Music is an Android-first local music player built around the repository's 
 
 - Media3 ExoPlayer owns the playback queue, audio focus, noisy-output handling, and playback lifecycle.
 - MediaSessionService publishes the session for Android system controls.
+- Playback transitions use a gentle fade-down before manual Next/Previous or song selection, plus an automatic fade near the end of a track and a fade-up when the next item is ready. The transition service remains active during background playback. Media3 still owns playlist progression and decoding; this is a volume-ramped transition, not a two-song-overlap DJ crossfade.
 - DspAudioProcessor is inserted into the Media3 audio sink for stereo PCM16 output.
 - JNI routes the signal through stereo_dsp::EngineSelector, then through the existing 16-band peq::Engine.
 - The selector's Off, Consumer Enhancer, and Halo Bloom options choose one enhancer at a time. The PEQ is a separate stage and can be switched independently.
