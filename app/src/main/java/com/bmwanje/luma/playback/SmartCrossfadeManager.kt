@@ -244,7 +244,14 @@ class SmartCrossfadeManager(
                         continue
                     }
 
-                    val requestedDuration = currentSettings.durationMs.coerceAtMost(duration)
+                    // Never let the crossfade consume almost an entire short track. Cap the
+                    // overlap to half of the outgoing song so it begins near the end, not at start.
+                    val requestedDuration = currentSettings.durationMs.coerceAtMost(duration / 2L)
+                    if (requestedDuration < 120L) {
+                        discardStandby()
+                        delay(55L)
+                        continue
+                    }
                     val preloadLead = requestedDuration + 1_800L
 
                     if (remaining <= preloadLead && preparedForMediaId != mediaId) {
