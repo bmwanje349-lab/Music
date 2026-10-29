@@ -5,10 +5,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -127,6 +124,7 @@ class AutomaticPlaybackFader(
                     )
                 }
             } else if (
+                autoFadeItemId != null &&
                 autoFadeItemId == mediaId &&
                 (
                     !player.playWhenReady ||
@@ -233,8 +231,13 @@ class PlaybackTransitionCommands(
     }
 
     override fun close() {
+        val volumeWasFading = player.volume < 0.99f
         queueChangeJob?.cancel()
         queueChangeJob = null
+        // Don't leave background playback attenuated if the UI is torn down mid-transition.
+        if (volumeWasFading && player.playbackState == Player.STATE_READY) {
+            player.volume = NORMAL_PLAYBACK_VOLUME
+        }
     }
 }
 
