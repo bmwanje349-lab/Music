@@ -21,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -117,9 +116,7 @@ fun NowPlayingScreen(
                     Text("From your library", color = SecondaryText, fontSize = 11.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { /* reserved for the track options menu */ }, modifier = Modifier.size(46.dp)) {
-                    Icon(Icons.Rounded.MoreHoriz, contentDescription = "Track options", tint = SecondaryText)
-                }
+                Spacer(Modifier.size(46.dp))
             }
 
             Spacer(Modifier.height(22.dp))
