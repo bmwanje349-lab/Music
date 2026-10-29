@@ -11,15 +11,23 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
 @UnstableApi
 class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
+    private lateinit var transitionScope: CoroutineScope
+    private var transitionPlayer: TransitioningPlayer? = null
+    private var automaticFader: AutomaticPlaybackFader? = null
 
     override fun onCreate() {
         super.onCreate()
         DspController.initialize(applicationContext)
+        transitionScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
@@ -47,7 +55,10 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        mediaSession = MediaSession.Builder(this, player).build()
+        // The service-owned fader works even when the activity is off-screen or the phone is locked.
+        automaticFader = AutomaticPlaybackFader(player, transitionScope)
+        transitionPlayer = TransitioningPlayer(player, transitionScope)
+        mediaSession = MediaSession.Builder(this, transitionPlayer!!).build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -57,11 +68,14 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
-        mediaSession?.run {
-            player.release()
-            release()
-        }
+        automaticFader?.close()
+        automaticFader = null
+        transitionPlayer?.close()
+        transitionPlayer = null
+        mediaSession?.release()
         mediaSession = null
+        if (::player.isInitialized) player.release()
+        if (::transitionScope.isInitialized) transitionScope.cancel()
         super.onDestroy()
     }
 }
