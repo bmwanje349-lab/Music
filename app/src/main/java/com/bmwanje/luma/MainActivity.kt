@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +48,8 @@ import com.bmwanje.luma.data.MusicTrack
 import com.bmwanje.luma.playback.DspController
 import com.bmwanje.luma.playback.PlaybackService
 import com.bmwanje.luma.playback.PlaybackTransitionCommands
+import com.bmwanje.luma.playback.SongTransitionSettingsStore
+import com.bmwanje.luma.playback.SongTransitionStyle
 import com.bmwanje.luma.ui.EqualizerScreen
 import com.bmwanje.luma.ui.HomeScreen
 import com.bmwanje.luma.ui.LibraryScreen
@@ -66,6 +69,7 @@ class MainActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(11, 13, 18)
         window.navigationBarColor = android.graphics.Color.rgb(11, 13, 18)
         DspController.initialize(applicationContext)
+        SongTransitionSettingsStore.initialize(applicationContext)
         setContent { LumaTheme { LumaMusicApp() } }
     }
 }
@@ -94,6 +98,7 @@ private fun LumaMusicApp() {
     var currentTick by remember { mutableIntStateOf(0) }
     var showNowPlaying by remember { mutableStateOf(false) }
     val controller = rememberMediaController(context)
+    val transitionSettings by SongTransitionSettingsStore.settings.collectAsState()
     val scope = rememberCoroutineScope()
     val transitionCommands = remember(controller) {
         controller?.let { PlaybackTransitionCommands(it, scope) }
@@ -245,7 +250,10 @@ private fun LumaMusicApp() {
                 MainTab.SETTINGS -> SettingsScreen(
                     trackCount = tracks.size,
                     hasPermission = hasPermission,
-                    onRescan = ::rescanLibrary
+                    onRescan = ::rescanLibrary,
+                    transitionSettings = transitionSettings,
+                    onTransitionStyleChange = SongTransitionSettingsStore::setStyle,
+                    onTransitionDurationChange = SongTransitionSettingsStore::setDurationMs
                 )
             }
         }
