@@ -23,10 +23,15 @@ constexpr float kGlueMakeup = 1.778f;      // +5 dB on the parallel path
 constexpr float kGlueThresholdDb = -26.0f;
 constexpr float kGlueRatio = 4.0f;
 constexpr float kGlueKneeDb = 8.0f;
-constexpr float kSpaceAmbience = 0.75f;
-constexpr float kSpaceWiden = 0.5f;
-constexpr float kSpaceTapMs[4] = {11.3f, 17.9f, 23.7f, 31.1f};
-constexpr float kSpaceTapGain[4] = {0.50f, -0.40f, 0.32f, -0.25f};
+// Stronger Bloom-like stereo field: wider high-side energy, slow orbit and a
+// four-reflection room with a controlled feedback tail.
+constexpr float kSpaceWiden = 0.72f;
+constexpr float kSpaceMotion = 0.18f;       // stronger than Halo Bloom's estimated 0.12
+constexpr float kSpaceMotionRateHz = 0.04f;
+constexpr float kSpaceTailGain = 0.46f;     // stronger tail feedback than Halo's 0.30
+constexpr float kSpaceTapMs[4] = {17.0f, 29.0f, 48.0f, 73.0f};
+constexpr float kSpaceTapGain[4] = {0.48f, 0.36f, 0.29f, 0.23f};
+constexpr float kSpaceTapPan[4] = {-0.72f, 0.70f, -0.12f, 0.35f};
 constexpr float kAutoFloorDb = -20.0f;   // lift tracks quieter than this (RMS dBFS)
 constexpr float kAutoCeilDb = -9.0f;     // trim only tracks hotter than this
 constexpr float kAutoMaxBoostDb = 9.0f;
@@ -55,6 +60,21 @@ inline float softClip(float x) noexcept {
 inline float stage(float x, float a, float b) noexcept {
     const float t = clamp01((x - a) / (b - a));
     return t * t * (3.0f - 2.0f * t);
+}
+
+// Fractional read for the short side-only orbit. Uses the current write cursor;
+// all callers request a positive delay so the current sample is never read back.
+inline float readDelay(const std::vector<float>& buffer, std::size_t write,
+                       float delaySamples) noexcept {
+    const std::size_t size = buffer.size();
+    if (size < 3U || !std::isfinite(delaySamples)) return 0.0f;
+    const float safeDelay = std::max(1.0f, std::min(delaySamples,
+                                     static_cast<float>(size - 2U)));
+    const std::size_t whole = static_cast<std::size_t>(safeDelay);
+    const float frac = safeDelay - static_cast<float>(whole);
+    const std::size_t i0 = (write + size - whole) % size;
+    const std::size_t i1 = (i0 + size - 1U) % size;
+    return buffer[i0] + (buffer[i1] - buffer[i0]) * frac;
 }
 } // namespace
 
@@ -217,19 +237,27 @@ bool ConsumerEnhancer::prepare(const Config& requested) noexcept {
     for (auto& hp : outHp_) hp.setHighPass(fs, std::min(150.0, nyq));
     for (auto& hp : inHp_) hp.setHighPass(fs, std::min(150.0, nyq));
     spaceSafeCoef_ = std::pow(expCoef(200.0f, fs_), 4.0f);   // control runs every 4th frame
+    spaceEnvAtt_ = expCoef(25.0f, fs_);
+    spaceEnvRel_ = expCoef(180.0f, fs_);
 
     try {
-        const std::size_t size = static_cast<std::size_t>(std::ceil(0.040 * fs)) + 2U;
+        // 120 ms covers the 73 ms late reflection plus the feedback tail.
+        const std::size_t size = static_cast<std::size_t>(std::ceil(0.120 * fs)) + 2U;
         spaceBuf_.assign(size, 0.0f);
+        spaceSideBuf_.assign(size, 0.0f);
     } catch (...) {
         spaceBuf_.clear();
+        spaceSideBuf_.clear();
         return false;
     }
     for (std::size_t k = 0; k < kSpaceTaps; ++k) {
         spaceDelay_[k] = static_cast<std::size_t>(kSpaceTapMs[k] * 0.001 * fs);
+        const float angle = (kSpaceTapPan[k] + 1.0f) * static_cast<float>(kPi) / 4.0f;
+        spaceTapGainL_[k] = std::cos(angle) * kSpaceTapGain[k];
+        spaceTapGainR_[k] = std::sin(angle) * kSpaceTapGain[k];
     }
-    spaceHp_.setHighPass(fs, std::min(250.0, nyq));
-    spaceLp_.setLowPass(fs, std::min(7000.0, nyq));
+    spaceHp_.setHighPass(fs, std::min(180.0, nyq));
+    for (auto& lp : spaceLp_) lp.setLowPass(fs, std::min(7000.0, nyq));
     sideWidenHp_.setHighPass(fs, std::min(450.0, nyq));
 
     // Harmonic bass: 4th-order low-pass at 120 Hz picks the fundamental region,
@@ -263,7 +291,7 @@ bool ConsumerEnhancer::prepare(const Config& requested) noexcept {
 
 void ConsumerEnhancer::clearStates() noexcept {
     midLowShelf_.clear(); midHighShelf_.clear(); midPresence_.clear();
-    midMud_.clear(); sideHighShelf_.clear();
+    midMud_.clear(); sideHighShelf_.clear(); sidePresenceDip_.clear();
     bassLp1_.clear(); bassLp2_.clear(); bassHp1_.clear(); bassHp2_.clear();
     bassBandLp_.clear();
     bassEnv_ = 0.0f;
@@ -276,7 +304,11 @@ void ConsumerEnhancer::clearStates() noexcept {
     punchGain_ = 1.0f;
     gluePower_ = 0.0f;
     std::fill(spaceBuf_.begin(), spaceBuf_.end(), 0.0f);
+    std::fill(spaceSideBuf_.begin(), spaceSideBuf_.end(), 0.0f);
     spaceWrite_ = 0U;
+    spaceFeedback_ = 0.0f;
+    spacePhase_ = 0.0f;
+    spaceEnv_ = 0.0f;
     for (int k = 0; k < 2; ++k) { autoHp_[k].clear(); harshHp_[k].clear(); harshLp_[k].clear(); }
     autoPower_ = 0.0f; autoGainDb_ = 0.0f;
     for (auto& d : detail_) {
@@ -288,7 +320,7 @@ void ConsumerEnhancer::clearStates() noexcept {
     for (auto& hp : inHp_) hp.clear();
     inPower_ = outPower_ = 0.0f; matchDb_ = 0.0f; matchDesired_ = 0.0f; spaceSafe_ = 1.0f;
     harshBandEnv_ = harshFullEnv_ = 0.0f;
-    spaceHp_.clear(); spaceLp_.clear(); sideWidenHp_.clear();
+    spaceHp_.clear(); for (auto& lp : spaceLp_) lp.clear(); sideWidenHp_.clear();
 }
 
 void ConsumerEnhancer::reset() noexcept {
@@ -305,9 +337,13 @@ void ConsumerEnhancer::updateCoefficients() noexcept {
     const double highDb = smooth_[kClarity] * (1.5 + 2.5 * need);    // up to +4 dB
     midLowShelf_.setLowShelf(fs, std::min(120.0, nyq), lowDb);
     midHighShelf_.setHighShelf(fs, std::min(7500.0, nyq), highDb);
-    sideHighShelf_.setHighShelf(fs, std::min(7500.0, nyq), highDb);
+    // Extra side-only air follows the space stage; cap the combined shelf.
+    sideHighShelf_.setHighShelf(fs, std::min(7500.0, nyq),
+                                std::min(6.0, highDb + 2.0 * smooth_[kSpace]));
     midPresence_.setPeaking(fs, std::min(2800.0, nyq), 0.9, 3.5 * smooth_[kMelody]);
     midMud_.setPeaking(fs, std::min(320.0, nyq), 0.8, -1.2 * smooth_[kMelody]);
+    // Keep the vocal/melody image prominent by moving competing edge energy back.
+    sidePresenceDip_.setPeaking(fs, std::min(2800.0, nyq), 0.75, -1.65 * smooth_[kMelody]);
 }
 
 // ---------------------------------------------------------------- controls
@@ -541,7 +577,7 @@ void ConsumerEnhancer::process(float* samples, std::size_t frames) noexcept {
             const float hit = clamp01((lift - 1.3f) / 1.7f);
             midT += lowMid * hit * bassGate * smooth_[kBass] * kThumpGain;
         }
-        const float sideT = sideHighShelf_.process(side);
+        const float sideT = sidePresenceDip_.process(sideHighShelf_.process(side));
 
         float out[2] = {midT + sideT, midT - sideT};
 
@@ -628,26 +664,66 @@ void ConsumerEnhancer::process(float* samples, std::size_t frames) noexcept {
             out[1] += out[1] * wetGain;
         }
 
-        // ---- 7. Space: ambience + airy width, Side only (mono sum untouched)
+        // ---- 7. Space: stronger Bloom-style orbit + panned reflections/tail.
+        // The direct mid remains anchored. Only high-side energy is widened/orbited,
+        // while the room bus is high-passed and added as stereo reflections (not anti-phase).
         {
             const float m = 0.5f * (out[0] + out[1]);
-            float s = 0.5f * (out[0] - out[1]);
+            const float s = 0.5f * (out[0] - out[1]);
             const std::size_t size = spaceBuf_.size();
-            spaceBuf_[spaceWrite_] = m;
-            float amb = 0.0f;
-            for (std::size_t k = 0; k < kSpaceTaps; ++k) {
-                const std::size_t idx = (spaceWrite_ + size - spaceDelay_[k]) % size;
-                amb += kSpaceTapGain[k] * spaceBuf_[idx];
-            }
-            spaceWrite_ = (spaceWrite_ + 1U) % size;
-            amb = spaceLp_.process(spaceHp_.process(amb));
-            const float tail = 1.0f - 0.6f * attackAmount;  // keep drum hits dry
-            const float airySide = sideWidenHp_.process(s);
-            s += smooth_[kSpace] * spaceSafe_ * (kSpaceAmbience * tail * amb + kSpaceWiden * airySide);
-            out[0] = m + s;
-            out[1] = m - s;
-        }
 
+            // Bloom-like loudness-following width, with a modest transient push.
+            const float level = std::max(std::fabs(m), std::fabs(s));
+            const float envCoef = level > spaceEnv_ ? spaceEnvAtt_ : spaceEnvRel_;
+            spaceEnv_ = envCoef * spaceEnv_ + (1.0f - envCoef) * level;
+            const float bloomLevel = clamp01(spaceEnv_ * 3.4f);
+            const float widthFollow = std::max(0.70f, std::min(1.45f,
+                1.0f + 0.85f * (bloomLevel - 0.32f) + 0.25f * attackAmount));
+            const float airySide = sideWidenHp_.process(s);
+            const float widening = smooth_[kSpace] * spaceSafe_ * kSpaceWiden * widthFollow;
+
+            // Opposing short delays give the edges slow, subtle movement without
+            // modulating the centre or low-frequency bass.
+            spaceSideBuf_[spaceWrite_] = airySide;
+            spacePhase_ += 2.0f * static_cast<float>(kPi) * kSpaceMotionRateHz / fs_;
+            if (spacePhase_ >= 2.0f * static_cast<float>(kPi))
+                spacePhase_ -= 2.0f * static_cast<float>(kPi);
+            const float motion = kSpaceMotion * smooth_[kSpace] * spaceSafe_;
+            const float baseDelay = 0.0035f * motion * fs_;
+            const float depth = 0.0075f * motion * fs_;
+            const float wobble = std::sin(spacePhase_);
+            const float delayA = baseDelay + depth * (0.5f + 0.5f * wobble);
+            const float delayB = baseDelay + depth * (0.5f - 0.5f * wobble);
+            const float directGain = std::cos(motion * static_cast<float>(kPi) * 0.5f);
+            const float orbitGain = std::sin(motion * static_cast<float>(kPi) * 0.5f);
+            const float orbitA = readDelay(spaceSideBuf_, spaceWrite_, delayA);
+            const float orbitB = readDelay(spaceSideBuf_, spaceWrite_, delayB);
+            const float sideL = s + widening * (directGain * airySide + orbitGain * orbitA);
+            const float sideR = s + widening * (directGain * airySide + orbitGain * orbitB);
+
+            // A transient opens the room slightly, but the 180 Hz high-pass keeps
+            // kick/bass energy out of the reflections. The 73 ms tap feeds its tail.
+            const float roomOpen = 1.0f + 0.35f * attackAmount;
+            const float send = spaceHp_.process(smooth_[kSpace] * roomOpen *
+                                                (0.58f * s + 0.22f * m));
+            spaceBuf_[spaceWrite_] = send + spaceFeedback_ * smooth_[kSpace];
+
+            float roomL = 0.0f, roomR = 0.0f, lastTap = 0.0f;
+            for (std::size_t k = 0; k < kSpaceTaps; ++k) {
+                const std::size_t tapIndex = (spaceWrite_ + size - spaceDelay_[k]) % size;
+                const float tap = spaceBuf_[tapIndex];
+                roomL += spaceTapGainL_[k] * tap;
+                roomR += spaceTapGainR_[k] * tap;
+                if (k + 1U == kSpaceTaps) lastTap = tap;
+            }
+            spaceFeedback_ = lastTap * kSpaceTailGain;
+            roomL = spaceLp_[0].process(roomL);
+            roomR = spaceLp_[1].process(roomR);
+            spaceWrite_ = (spaceWrite_ + 1U) % size;
+
+            out[0] = m + sideL + roomL;
+            out[1] = m - sideR + roomR;
+        }
         // ---- 8. Loudness match: hold output loudness to the (leveled) input loudness
         {
             const float iL = inHp_[0].process(in[0]);
