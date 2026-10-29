@@ -23,7 +23,7 @@ struct NativeProcessor {
     std::vector<float> work;
     bool configured = false;
 
-    NativeProcessor() : work(static_cast<std::size_t>(kMaxChunkFrames) * kChannels, 0.0f) {}
+    NativeProcessor() : work(static_cast<std::size_t>(kDrainMaxFrames) * kChannels, 0.0f) {}
 };
 
 NativeProcessor* get(jlong handle) {
