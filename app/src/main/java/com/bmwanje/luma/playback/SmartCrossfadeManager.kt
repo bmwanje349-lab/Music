@@ -247,7 +247,7 @@ class SmartCrossfadeManager(
                     val preloadLead = requestedDuration + 1_800L
 
                     if (remaining <= preloadLead && preparedForMediaId != mediaId) {
-                        prepareStandby(player, nextIndex, mediaId, next.mediaId)
+                        prepareStandby(player, nextIndex, current.mediaId, next.mediaId)
                     }
 
                     val standbyIndex = 1 - activeIndex
