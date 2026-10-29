@@ -33,6 +33,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,8 @@ import com.bmwanje.luma.ui.MiniPlayer
 import com.bmwanje.luma.ui.NowPlayingScreen
 import com.bmwanje.luma.ui.SettingsScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -85,8 +88,18 @@ private fun LumaMusicApp() {
     var tracks by remember { mutableStateOf<List<MusicTrack>>(emptyList()) }
     var favorites by remember { mutableStateOf(FavoritesStore.load(context)) }
     var selectedTab by remember { mutableStateOf(MainTab.HOME) }
+    var currentTick by remember { mutableIntStateOf(0) }
     var showNowPlaying by remember { mutableStateOf(false) }
     val controller = rememberMediaController(context)
+
+    LaunchedEffect(controller) {
+        while (isActive) {
+            if ((controller?.mediaItemCount ?: 0) > 0) currentTick++
+            delay(500)
+        }
+    }
+    @Suppress("UNUSED_VARIABLE")
+    val playbackRefresh = currentTick
 
     LaunchedEffect(hasPermission) {
         if (hasPermission) {
