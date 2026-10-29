@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -55,6 +56,7 @@ import com.bmwanje.luma.ui.SettingsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -91,6 +93,7 @@ private fun LumaMusicApp() {
     var currentTick by remember { mutableIntStateOf(0) }
     var showNowPlaying by remember { mutableStateOf(false) }
     val controller = rememberMediaController(context)
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(controller) {
         while (isActive) {
@@ -132,6 +135,18 @@ private fun LumaMusicApp() {
 
     fun toggleFavorite(track: MusicTrack) {
         favorites = FavoritesStore.toggle(context, track.id)
+    }
+
+    fun rescanLibrary() {
+        if (!hasPermission) {
+            permissionLauncher.launch(permission)
+            return
+        }
+        scope.launch {
+            val refreshed = withContext(Dispatchers.IO) { LibraryRepository.loadTracks(context) }
+            tracks = refreshed
+            favorites = FavoritesStore.load(context)
+        }
     }
 
     if (showNowPlaying && currentItem != null) {
@@ -220,12 +235,7 @@ private fun LumaMusicApp() {
                     favorites = favorites,
                     hasPermission = hasPermission,
                     onRequestPermission = { permissionLauncher.launch(permission) },
-                    onRefresh = {
-                        if (hasPermission) {
-                            tracks = LibraryRepository.loadTracks(context)
-                            favorites = FavoritesStore.load(context)
-                        }
-                    },
+                    onRefresh = ::rescanLibrary,
                     onPlayTrack = ::playTrack,
                     onToggleFavorite = ::toggleFavorite
                 )
@@ -233,10 +243,7 @@ private fun LumaMusicApp() {
                 MainTab.SETTINGS -> SettingsScreen(
                     trackCount = tracks.size,
                     hasPermission = hasPermission,
-                    onRescan = {
-                        if (hasPermission) tracks = LibraryRepository.loadTracks(context)
-                        else permissionLauncher.launch(permission)
-                    }
+                    onRescan = ::rescanLibrary
                 )
             }
         }
