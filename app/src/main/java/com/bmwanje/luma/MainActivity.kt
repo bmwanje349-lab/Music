@@ -46,6 +46,7 @@ import com.bmwanje.luma.data.LibraryRepository
 import com.bmwanje.luma.data.MusicTrack
 import com.bmwanje.luma.playback.DspController
 import com.bmwanje.luma.playback.PlaybackService
+import com.bmwanje.luma.playback.PlaybackTransitionCommands
 import com.bmwanje.luma.ui.EqualizerScreen
 import com.bmwanje.luma.ui.HomeScreen
 import com.bmwanje.luma.ui.LibraryScreen
@@ -94,6 +95,12 @@ private fun LumaMusicApp() {
     var showNowPlaying by remember { mutableStateOf(false) }
     val controller = rememberMediaController(context)
     val scope = rememberCoroutineScope()
+    val transitionCommands = remember(controller) {
+        controller?.let { PlaybackTransitionCommands(it, scope) }
+    }
+    DisposableEffect(transitionCommands) {
+        onDispose { transitionCommands?.close() }
+    }
 
     LaunchedEffect(controller) {
         while (isActive) {
@@ -117,9 +124,7 @@ private fun LumaMusicApp() {
         val player = controller ?: return
         val index = tracks.indexOfFirst { it.id == track.id }
         if (index < 0) return
-        player.setMediaItems(tracks.map { it.toMediaItem() }, index, 0L)
-        player.prepare()
-        player.play()
+        transitionCommands?.playQueue(tracks.map { it.toMediaItem() }, index)
         showNowPlaying = true
     }
 
@@ -127,10 +132,7 @@ private fun LumaMusicApp() {
         val player = controller ?: return
         if (tracks.isEmpty()) return
         val queue = if (shuffle) tracks.shuffled() else tracks
-        player.setMediaItems(queue.map { it.toMediaItem() }, 0, 0L)
-        player.shuffleModeEnabled = false
-        player.prepare()
-        player.play()
+        transitionCommands?.playQueue(queue.map { it.toMediaItem() }, 0)
     }
 
     fun toggleFavorite(track: MusicTrack) {
