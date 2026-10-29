@@ -20,7 +20,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                cppFlags += listOf("-std=c++17", "-O2", "-fno-exceptions", "-fno-rtti")
+                cppFlags += listOf("-std=c++17", "-O2")
                 arguments += listOf("-DANDROID_STL=c++_static")
             }
         }
