@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="luma_background">#0B0D12</color>
+    <color name="luma_accent">#B7F36B</color>
+    <color name="luma_icon_bg">#151A23</color>
+</resources>
