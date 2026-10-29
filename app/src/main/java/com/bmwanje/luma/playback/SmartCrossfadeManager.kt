@@ -15,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
@@ -328,15 +329,20 @@ class SmartCrossfadeManager(
         incoming.play()
 
         crossfadeJob = scope.launch {
+            val thisJob = currentCoroutineContext()[Job]
+            var completedNormally = false
             try {
                 crossfadeVolumes(outgoing, incoming, durationMs)
+                completedNormally = true
             } finally {
                 outgoing.pause()
                 outgoing.volume = 0f
                 outgoing.clearMediaItems()
-                incoming.volume = 1f
+                // If a listener interrupted the crossfade, do not overwrite the manual action's
+                // own volume envelope with a late "restore to full volume".
+                if (completedNormally) incoming.volume = 1f
                 isCrossfading = false
-                crossfadeJob = null
+                if (crossfadeJob === thisJob) crossfadeJob = null
             }
         }
     }
