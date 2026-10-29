@@ -13,10 +13,11 @@ constexpr float kSafeMagnitude = 1.0e6f;
 constexpr double kTiny = 1.0e-30;
 
 // Stage strengths at 100% macro / 100% trim.
-constexpr float kBassHarmonicGain = 0.9f;
+constexpr float kBassHarmonicGain = 1.4f;  // missing-fundamental harmonics: bass you can "hear" on any speaker
+constexpr float kThumpGain = 0.7f;         // up to about +4.6 dB on bass events (kick / bass-note onsets)
 constexpr float kClarityGain = 1.2f;
 constexpr float kWarmthMix = 0.45f;
-constexpr float kPunchMaxBoost = 0.9f;     // +5.6 dB on a full-strength attack
+constexpr float kPunchMaxBoost = 1.1f;     // +6.4 dB on a full-strength attack
 constexpr float kGlueMix = 0.35f;
 constexpr float kGlueMakeup = 1.778f;      // +5 dB on the parallel path
 constexpr float kGlueThresholdDb = -26.0f;
@@ -34,13 +35,14 @@ constexpr float kHarshRatioStart = 0.35f;
 constexpr float kHarshMaxCut = 0.5f;     // up to about -6 dB of the 4.5-9 kHz band
 constexpr float kSoftKnee = 0.7f;
 // Background detail engine (band edges 200 / 1200 / 4500 Hz)
-constexpr float kDetailMaxBoostDb[4] = {1.5f, 4.0f, 5.0f, 3.0f};  // treble capped: codec/hiss risk
-constexpr float kMaskCutDb[4] = {2.0f, 2.0f, 1.5f, 1.0f};
+constexpr float kDetailMaxBoostDb[4] = {2.5f, 5.5f, 6.5f, 3.5f};  // treble capped: codec/hiss risk
+constexpr float kMaskCutDb[4] = {2.5f, 2.5f, 2.0f, 1.2f};         // foreground ducks a little: more contrast
 constexpr float kSideBoostScale = 1.3f;   // backing/ambience lives to the sides
 constexpr float kBassMaskMaxDb = 2.5f;
-constexpr float kMicroBoost = 0.26f;      // about +2 dB on a quiet fine attack
+constexpr float kMicroBoost = 0.45f;      // about +3.2 dB on a quiet fine attack
 constexpr float kMatchMaxCutDb = 6.0f;
-constexpr float kMatchMaxLiftDb = 3.0f;
+constexpr float kMatchMaxLiftDb = 3.5f;
+constexpr float kMatchBiasDb = 0.8f;      // listeners prefer slightly louder, so end a touch above the input
 
 inline float clamp01(float v) noexcept { return std::max(0.0f, std::min(1.0f, v)); }
 // Smooth 0->1 ramp as the slider travels from a to b.
@@ -230,13 +232,14 @@ bool ConsumerEnhancer::prepare(const Config& requested) noexcept {
     spaceLp_.setLowPass(fs, std::min(7000.0, nyq));
     sideWidenHp_.setHighPass(fs, std::min(450.0, nyq));
 
-    // Harmonic bass: 4th-order low-pass at 100 Hz picks the fundamental region,
-    // 4th-order high-pass at 140 Hz plus a 450 Hz low-pass keep only harmonics.
-    bassLp1_.setLowPass(fs, std::min(100.0, nyq));
-    bassLp2_.setLowPass(fs, std::min(100.0, nyq));
-    bassHp1_.setHighPass(fs, std::min(140.0, nyq));
-    bassHp2_.setHighPass(fs, std::min(140.0, nyq));
-    bassBandLp_.setLowPass(fs, std::min(450.0, nyq));
+    // Harmonic bass: 4th-order low-pass at 120 Hz picks the fundamental region,
+    // 4th-order high-pass at 150 Hz plus a 650 Hz low-pass keep only harmonics
+    // (the 2nd-4th harmonics that phone and earbud drivers can actually reproduce).
+    bassLp1_.setLowPass(fs, std::min(120.0, nyq));
+    bassLp2_.setLowPass(fs, std::min(120.0, nyq));
+    bassHp1_.setHighPass(fs, std::min(150.0, nyq));
+    bassHp2_.setHighPass(fs, std::min(150.0, nyq));
+    bassBandLp_.setLowPass(fs, std::min(650.0, nyq));
 
     for (auto& c : ch_) {
         c.clarityHp.setHighPass(fs, std::min(3200.0, nyq));
@@ -303,7 +306,7 @@ void ConsumerEnhancer::updateCoefficients() noexcept {
     midLowShelf_.setLowShelf(fs, std::min(120.0, nyq), lowDb);
     midHighShelf_.setHighShelf(fs, std::min(7500.0, nyq), highDb);
     sideHighShelf_.setHighShelf(fs, std::min(7500.0, nyq), highDb);
-    midPresence_.setPeaking(fs, std::min(2800.0, nyq), 0.9, 2.8 * smooth_[kMelody]);
+    midPresence_.setPeaking(fs, std::min(2800.0, nyq), 0.9, 3.5 * smooth_[kMelody]);
     midMud_.setPeaking(fs, std::min(320.0, nyq), 0.8, -1.2 * smooth_[kMelody]);
 }
 
@@ -409,9 +412,9 @@ void ConsumerEnhancer::processDetail(float& mid, float& side) noexcept {
                 const float e = db.env + 1.0e-9f;
                 const float relDb = 6.0206f * std::log2(e / (db.ref + 1.0e-9f));
                 const float noiseDb = 6.0206f * std::log2(e / (db.floor + 1.0e-9f));
-                const float above = clamp01((relDb - 1.0f) / 6.0f);    // foreground event
-                const float quiet = clamp01((-relDb - 3.0f) / 9.0f);  // quiet vs its own level
-                const float clean = clamp01((noiseDb - 9.0f) / 12.0f); // well above the noise floor
+                const float above = clamp01((relDb - 0.5f) / 5.0f);    // foreground event
+                const float quiet = clamp01((-relDb - 1.5f) / 6.0f);  // quiet vs its own level
+                const float clean = clamp01((noiseDb - 6.0f) / 9.0f); // clearly above the noise floor
                 float boost = kDetailMaxBoostDb[b] * quiet * clean * amount;
                 if (s == 1) boost *= kSideBoostScale * sideSafe_;
                 float cut = kMaskCutDb[b] * above * amount;
@@ -459,13 +462,16 @@ void ConsumerEnhancer::process(float* samples, std::size_t frames) noexcept {
     // The single slider travels through the stages in order, so low settings are a
     // tasteful tone lift and high settings add the full show.
     target[kMelody]  = stage(macro, 0.00f, 0.45f) * melodyTrim_.load(std::memory_order_relaxed);
-    target[kBass]    = stage(macro, 0.00f, 0.50f) * bassTrim_.load(std::memory_order_relaxed);
+    target[kBass]    = stage(macro, 0.00f, 0.35f) * bassTrim_.load(std::memory_order_relaxed);
     target[kWarmth]  = stage(macro, 0.05f, 0.70f) * warmthTrim_.load(std::memory_order_relaxed);
-    target[kGlue]    = stage(macro, 0.10f, 0.80f) * glueTrim_.load(std::memory_order_relaxed);
-    target[kClarity] = stage(macro, 0.20f, 0.90f) * clarityTrim_.load(std::memory_order_relaxed);
-    target[kPunch]   = stage(macro, 0.25f, 1.00f) * punchTrim_.load(std::memory_order_relaxed);
+    target[kGlue]    = stage(macro, 0.05f, 0.70f) * glueTrim_.load(std::memory_order_relaxed);
+    target[kClarity] = stage(macro, 0.12f, 0.80f) * clarityTrim_.load(std::memory_order_relaxed);
+    target[kPunch]   = stage(macro, 0.10f, 0.85f) * punchTrim_.load(std::memory_order_relaxed);
     target[kSpace]   = stage(macro, 0.35f, 1.00f) * spaceTrim_.load(std::memory_order_relaxed);
-    target[kDetail]  = stage(macro, 0.00f, 1.00f) * detailTrim_.load(std::memory_order_relaxed);
+    // Detail is front-loaded (about 49% at slider 20%, 66% at 30%) so the change is
+    // noticeable early instead of only near the top of the slider.
+    const float inv = 1.0f - macro;
+    target[kDetail]  = (1.0f - inv * inv * inv) * detailTrim_.load(std::memory_order_relaxed);
     target[kMatch]   = stage(macro, 0.00f, 0.20f) * matchTrim_.load(std::memory_order_relaxed);
     target[kLevel]   = stage(macro, 0.00f, 0.40f);
     target[kShield]  = stage(macro, 0.25f, 0.90f) * shieldTrim_.load(std::memory_order_relaxed);
@@ -526,6 +532,15 @@ void ConsumerEnhancer::process(float* samples, std::size_t frames) noexcept {
         midT = midPresence_.process(midT);
         midT = midHighShelf_.process(midT);
         midT += bassHarm;
+        {
+            // Thump: the band-0 detector already tracks how far the bass sits above its
+            // own 1.2 s average. Bass events (kick, bass-note onsets) get a short lift of
+            // the real low end, so impact comes from dynamics, not a constant boom.
+            const DetailBand& lowBand = detail_[0].band[0];
+            const float lift = lowBand.env / (lowBand.ref + 1.0e-5f);
+            const float hit = clamp01((lift - 1.3f) / 1.7f);
+            midT += lowMid * hit * bassGate * smooth_[kBass] * kThumpGain;
+        }
         const float sideT = sideHighShelf_.process(side);
 
         float out[2] = {midT + sideT, midT - sideT};
@@ -647,7 +662,7 @@ void ConsumerEnhancer::process(float* samples, std::size_t frames) noexcept {
                 const float refPower = inPower_ + 1.0e-12f;
                 const float diffDb = 10.0f * std::log10(refPower / (outPower_ + 1.0e-12f));
                 const float weight = clamp01((10.0f * std::log10(refPower) + 60.0f) / 10.0f);
-                matchDesired_ = std::max(-kMatchMaxCutDb, std::min(kMatchMaxLiftDb, diffDb)) *
+                matchDesired_ = std::max(-kMatchMaxCutDb, std::min(kMatchMaxLiftDb, diffDb + kMatchBiasDb)) *
                                 weight * smooth_[kMatch];
             }
             matchDb_ = matchDesired_ + matchCoef_ * (matchDb_ - matchDesired_);

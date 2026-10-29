@@ -14,7 +14,8 @@ namespace stereo_dsp {
 //      melody presence (+2.8 kHz) and mud cut (-320 Hz) on the Mid only.
 //   2. Harmonic ("virtual") bass: level-normalised waveshaper on the mono
 //      low band, band-passed so the harmonics (2nd/3rd...) add perceived bass
-//      weight on small speakers/earbuds. Stays centred (mono).
+//      weight on small speakers/earbuds. Stays centred (mono). A "thump" lift of the
+//      real low end follows bass events (kick / bass-note onsets) for impact.
 //   3. Warmth: asymmetric tube-style saturation, normalised to unity small-signal gain.
 //   4. Clarity: gated high-band harmonic exciter ("air"/sparkle).
 //   5. Punch: transient shaper (fast vs slow envelope) for drum snap.
