@@ -85,6 +85,9 @@ class PlaybackService : MediaSessionService() {
                 requestAudioFocus = { audioFocus.request() },
                 onUserPause = {
                     if (::crossfadeManager.isInitialized) crossfadeManager.pauseByUser()
+                },
+                onBeforeManualChange = {
+                    if (::crossfadeManager.isInitialized) crossfadeManager.interruptCrossfadeForManualChange()
                 }
             )
         }
