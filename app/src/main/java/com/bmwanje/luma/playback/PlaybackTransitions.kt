@@ -77,6 +77,12 @@ class TransitioningPlayer(
     }
 
     override fun seekToPrevious() {
+        // Player.seekToPrevious() often restarts the current track when it is already underway.
+        // That does not emit a media-item transition, so fading it to zero would mute the restart.
+        if (delegate.currentPosition > 3_000L || !delegate.hasPreviousMediaItem()) {
+            delegate.seekToPrevious()
+            return
+        }
         fadeThen { delegate.seekToPrevious() }
     }
 
